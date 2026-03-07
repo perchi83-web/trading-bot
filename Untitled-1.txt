@@ -1,0 +1,33 @@
+# ============================================================
+# config.py — Configuración central del bot
+# ============================================================
+# Aquí van TODAS las variables que puedes cambiar sin tocar
+# el código principal. Es buena práctica separar config del logic.
+
+# --- TELEGRAM ---
+# Para obtener estos valores, te explico más abajo en el README
+TELEGRAM_TOKEN = "TU_TOKEN_AQUI"       # Lo da @BotFather en Telegram
+TELEGRAM_CHAT_ID = "TU_CHAT_ID_AQUI"  # Tu ID personal en Telegram
+
+# --- EXCHANGE (Binance) ---
+# Estas claves son SOLO DE LECTURA (no pueden ejecutar órdenes)
+# Se crean gratis en binance.com → API Management
+BINANCE_API_KEY = "TU_API_KEY_AQUI"
+BINANCE_SECRET  = "TU_SECRET_AQUI"
+
+# --- QUÉ MONITOREAR ---
+SIMBOLO = "BTC/USDT"        # Par a analizar
+INTERVALO = "15m"           # Vela: 1m, 5m, 15m, 1h, 4h, 1d
+FRECUENCIA_MINUTOS = 15     # Cada cuántos minutos revisa el bot
+
+# --- INDICADORES TÉCNICOS ---
+# RSI: mide si un activo está sobrecomprado o sobrevendido
+# Valores entre 0 y 100
+RSI_PERIODO     = 14    # Estándar de la industria
+RSI_SOBREVENDIDO  = 30  # Debajo de 30 → posible señal de COMPRA
+RSI_SOBRECOMPRADO = 70  # Encima de 70 → posible señal de VENTA
+
+# --- MODO SEGURO ---
+# En True: solo envía alertas, NO ejecuta órdenes reales
+# Cambia a False SOLO cuando entiendas bien el riesgo
+MODO_PAPER_TRADING = True

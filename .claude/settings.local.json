@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(pip install ccxt pandas pandas_ta requests apscheduler)",
+      "Bash(pip install ccxt pandas requests apscheduler)"
+    ]
+  }
+}

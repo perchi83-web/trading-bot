@@ -1,0 +1,4 @@
+config.py
+*.log
+historial_senales.csv
+__pycache__/
