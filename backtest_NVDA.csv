@@ -1,0 +1,5 @@
+fecha_salida,precio_salida,resultado,ganancia_perdida,capital_acumulado
+2025-12-23 15:30:00-05:00,189.21,TAKE_PROFIT,0.8,100.8
+2026-01-20 14:30:00-05:00,178.495,STOP_LOSS,-0.3,100.5
+2026-02-05 09:30:00-05:00,171.585,STOP_LOSS,-0.3,100.2
+2026-02-27 15:30:00-05:00,177.16,STOP_LOSS,-0.3,99.9
