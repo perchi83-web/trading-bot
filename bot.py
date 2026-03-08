@@ -32,6 +32,7 @@ from apscheduler.schedulers.blocking import BlockingScheduler
 
 import config
 import agente
+import paper_trading
 
 
 # ============================================================
@@ -328,12 +329,23 @@ def ejecutar_ciclo():
                 analisis = agente.obtener_analisis(senal, df)
 
                 if analisis["decision"] in ["COMPRA", "VENTA"]:
+                    # Registrar en paper trading
+                    paper_trading.abrir_operacion(
+                        senal["simbolo"],
+                        senal["precio"],
+                        analisis["decision"],
+                        analisis
+                    )
                     mensaje_final = agente.construir_mensaje_claude(
                         senal, analisis, senal["riesgo"]
                     )
                     enviar_telegram(mensaje_final)
                 else:
                     log.info(f"Claude descartó la señal: {analisis['razon']}")
+
+            # Verificar si hay operaciones abiertas que cerrar
+            precios = {senal["simbolo"]: senal["precio"]}
+            paper_trading.verificar_operaciones_abiertas(precios)
             guardar_registro(senal)
         except Exception as error:
             log.error(f"Error analizando {simbolo}: {error}")

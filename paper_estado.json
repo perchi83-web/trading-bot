@@ -1,0 +1,10 @@
+{
+  "capital_disponible": 100,
+  "capital_inicial": 100,
+  "operaciones_abiertas": {},
+  "total_operaciones": 0,
+  "operaciones_ganadoras": 0,
+  "operaciones_perdedoras": 0,
+  "ganancia_total": 0.0,
+  "fecha_inicio": "2026-03-08"
+}
