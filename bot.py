@@ -31,6 +31,7 @@ from datetime import datetime
 from apscheduler.schedulers.blocking import BlockingScheduler
 
 import config
+import agente
 
 
 # ============================================================
@@ -322,11 +323,17 @@ def ejecutar_ciclo():
                 f"RSI: {senal['rsi']} | "
                 f"Tendencia: {senal['tendencia']}"
             )
-            if senal["mensaje"]:
-                # Solo envía a Telegram si hay señal accionable
-                # ESPERAR solo se notifica una vez al día para no spamear
-                if senal["tipo"] in ["COMPRA", "VENTA"]:
-                    enviar_telegram(senal["mensaje"])
+            if senal["tipo"] in ["COMPRA", "VENTA"]:
+                # Claude razona la señal antes de alertar
+                analisis = agente.obtener_analisis(senal, df)
+
+                if analisis["decision"] in ["COMPRA", "VENTA"]:
+                    mensaje_final = agente.construir_mensaje_claude(
+                        senal, analisis, senal["riesgo"]
+                    )
+                    enviar_telegram(mensaje_final)
+                else:
+                    log.info(f"Claude descartó la señal: {analisis['razon']}")
             guardar_registro(senal)
         except Exception as error:
             log.error(f"Error analizando {simbolo}: {error}")
