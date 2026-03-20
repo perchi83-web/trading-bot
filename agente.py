@@ -53,8 +53,17 @@ def analizar_con_claude(datos_mercado):
     cliente = crear_cliente()
 
     # Construimos el prompt con todos los datos
-    prompt = f"""Eres un trader profesional con 15 años de experiencia.
+    prompt = f"""Eres un trader profesional con 15 años de experiencia
+y perfil MODERADAMENTE AGRESIVO.
+
 Analiza estos datos de mercado y dame tu opinión experta.
+
+REGLAS IMPORTANTES:
+- Si RSI < 28 y tendencia es ALCISTA → favorece COMPRA aunque el MACD sea negativo
+- El MACD negativo NO es razón suficiente para descartar una señal
+- Solo descarta si hay señales MUY contradictorias o riesgo extremo
+- Sé más permisivo con señales de compra en tendencia alcista
+- Recuerda: el objetivo es capturar oportunidades, no solo proteger capital
 
 DATOS DEL MERCADO:
 - Activo: {datos_mercado['simbolo']}
