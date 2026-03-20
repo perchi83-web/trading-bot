@@ -206,10 +206,15 @@ def evaluar_senal(df, simbolo):
             razon     = f"Tendencia ALCISTA pero RSI neutral ({rsi})"
 
     else:
-        # Tendencia BAJISTA — proteger capital
-        tipo      = "ESPERAR"
-        confianza = "-"
-        razon     = f"Tendencia BAJISTA (MA50 ${ma50} < MA200 ${ma200}) — capital protegido"
+        # Tendencia BAJISTA — proteger capital, salvo RSI extremo
+        if rsi < 20:
+            tipo      = "COMPRA"
+            confianza = "BAJA"
+            razon     = f"RSI extremadamente sobrevendido ({rsi}) pese a tendencia BAJISTA"
+        else:
+            tipo      = "ESPERAR"
+            confianza = "-"
+            razon     = f"Tendencia BAJISTA (MA50 ${ma50} < MA200 ${ma200}) — capital protegido"
 
     # Calcular riesgo solo si hay señal accionable
     riesgo = calcular_riesgo(precio) if tipo in ["COMPRA", "VENTA"] else None
