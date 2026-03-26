@@ -2,6 +2,8 @@
 # config.py — Configuración con variables de entorno
 # ============================================================
 import os
+from dotenv import load_dotenv
+load_dotenv()
 
 # --- TELEGRAM ---
 TELEGRAM_TOKEN   = os.getenv("TELEGRAM_TOKEN", "")
@@ -24,7 +26,7 @@ FRECUENCIA_MINUTOS = 60
 
 # --- INDICADORES TÉCNICOS ---
 RSI_PERIODO            = 14
-RSI_SOBREVENDIDO       = 28
+RSI_SOBREVENDIDO       = 32
 RSI_SOBRECOMPRADO      = 72
 
 # --- GESTIÓN DE RIESGO ---
