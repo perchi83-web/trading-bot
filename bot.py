@@ -27,12 +27,15 @@ import pandas as pd
 import yfinance as yf
 import requests
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 from apscheduler.schedulers.blocking import BlockingScheduler
 
 import config
 import agente
 import paper_trading
+
+# Registro de última alerta enviada por activo (anti-spam 4 horas)
+_ultima_alerta = {}  # { "BTC/USDT": datetime, ... }
 
 
 # ============================================================
@@ -330,23 +333,30 @@ def ejecutar_ciclo():
                 f"Tendencia: {senal['tendencia']}"
             )
             if senal["tipo"] in ["COMPRA", "VENTA"]:
-                # Claude razona la señal antes de alertar
-                analisis = agente.obtener_analisis(senal, df)
+                # Verificar cooldown de 4 horas por activo
+                ultima = _ultima_alerta.get(simbolo)
+                en_cooldown = ultima and (datetime.now() - ultima) < timedelta(hours=4)
 
-                if analisis["decision"] in ["COMPRA", "VENTA"]:
-                    # Registrar en paper trading
-                    paper_trading.abrir_operacion(
-                        senal["simbolo"],
-                        senal["precio"],
-                        analisis["decision"],
-                        analisis
-                    )
-                    mensaje_final = agente.construir_mensaje_claude(
-                        senal, analisis, senal["riesgo"]
-                    )
-                    enviar_telegram(mensaje_final)
+                if en_cooldown:
+                    log.info(f"{simbolo} en cooldown — alerta omitida (última hace {int((datetime.now()-ultima).seconds/60)} min)")
                 else:
-                    log.info(f"Claude descartó la señal: {analisis['razon']}")
+                    # Claude razona la señal antes de alertar
+                    analisis = agente.obtener_analisis(senal, df)
+
+                    if analisis["decision"] in ["COMPRA", "VENTA"]:
+                        paper_trading.abrir_operacion(
+                            senal["simbolo"],
+                            senal["precio"],
+                            analisis["decision"],
+                            analisis
+                        )
+                        mensaje_final = agente.construir_mensaje_claude(
+                            senal, analisis, senal["riesgo"]
+                        )
+                        enviar_telegram(mensaje_final)
+                        _ultima_alerta[simbolo] = datetime.now()
+                    else:
+                        log.info(f"Claude descartó la señal: {analisis['razon']}")
 
             # Verificar si hay operaciones abiertas que cerrar
             precios = {senal["simbolo"]: senal["precio"]}
