@@ -27,6 +27,7 @@ import pandas as pd
 import yfinance as yf
 import requests
 import logging
+import threading
 from datetime import datetime, timedelta
 from apscheduler.schedulers.blocking import BlockingScheduler
 
@@ -36,6 +37,9 @@ import paper_trading
 
 # Registro de última alerta enviada por activo (anti-spam 4 horas)
 _ultima_alerta = {}  # { "BTC/USDT": datetime, ... }
+
+# Señales pendientes de confirmación del usuario
+_senales_pendientes = {}  # { "callback_data": senal_dict }
 
 
 # ============================================================
@@ -286,6 +290,99 @@ def enviar_telegram(mensaje):
         log.error(f"Error enviando a Telegram: {resp.text}")
 
 
+def enviar_alerta_con_botones(mensaje, senal):
+    """
+    Envía la alerta con botones inline [ ✅ OPERAR ] [ ❌ IGNORAR ].
+    Guarda la señal en _senales_pendientes para responder al callback.
+    """
+    clave = f"{senal['simbolo']}_{int(datetime.now().timestamp())}"
+    _senales_pendientes[f"operar_{clave}"] = senal
+    _senales_pendientes[f"ignorar_{clave}"] = senal
+
+    url     = f"https://api.telegram.org/bot{config.TELEGRAM_TOKEN}/sendMessage"
+    payload = {
+        "chat_id":    config.TELEGRAM_CHAT_ID,
+        "text":       mensaje,
+        "reply_markup": {
+            "inline_keyboard": [[
+                {"text": "✅ OPERAR",  "callback_data": f"operar_{clave}"},
+                {"text": "❌ IGNORAR", "callback_data": f"ignorar_{clave}"}
+            ]]
+        }
+    }
+    resp = requests.post(url, json=payload)
+    if resp.status_code == 200:
+        log.info("Alerta con botones enviada a Telegram")
+    else:
+        log.error(f"Error enviando alerta con botones: {resp.text}")
+
+
+def responder_callback(callback_query_id, chat_id, texto):
+    """Responde a un toque de botón."""
+    # Confirmar el callback para quitar el "cargando"
+    requests.post(
+        f"https://api.telegram.org/bot{config.TELEGRAM_TOKEN}/answerCallbackQuery",
+        json={"callback_query_id": callback_query_id}
+    )
+    # Enviar el mensaje de respuesta
+    requests.post(
+        f"https://api.telegram.org/bot{config.TELEGRAM_TOKEN}/sendMessage",
+        json={"chat_id": chat_id, "text": texto}
+    )
+
+
+def iniciar_polling_callbacks():
+    """
+    Corre en un hilo separado. Escucha los toques de botón del usuario
+    y responde según si tocó OPERAR o IGNORAR.
+    """
+    offset = 0
+    log.info("Polling de callbacks iniciado")
+
+    while True:
+        try:
+            resp = requests.get(
+                f"https://api.telegram.org/bot{config.TELEGRAM_TOKEN}/getUpdates",
+                params={"offset": offset, "timeout": 30},
+                timeout=35
+            )
+            updates = resp.json().get("result", [])
+
+            for update in updates:
+                offset = update["update_id"] + 1
+
+                callback = update.get("callback_query")
+                if not callback:
+                    continue
+
+                data     = callback["data"]
+                chat_id  = callback["message"]["chat"]["id"]
+                cb_id    = callback["id"]
+
+                senal = _senales_pendientes.pop(data, None)
+                if senal is None:
+                    continue
+
+                if data.startswith("operar_"):
+                    riesgo = senal.get("riesgo") or {}
+                    stop   = riesgo.get("stop_loss", "N/A")
+                    target = riesgo.get("take_profit", "N/A")
+                    texto  = (
+                        f"✅ Señal confirmada. Ve a Binance\n"
+                        f"y compra $10 de {senal['simbolo']} a ${senal['precio']:,.2f}\n"
+                        f"Stop-Loss:   ${stop:,.2f}\n"
+                        f"Take-Profit: ${target:,.2f}"
+                    )
+                else:
+                    texto = "❌ Señal ignorada. Seguimos monitoreando."
+
+                responder_callback(cb_id, chat_id, texto)
+                log.info(f"Callback procesado: {data}")
+
+        except Exception as e:
+            log.error(f"Error en polling callbacks: {e}")
+
+
 # ============================================================
 # 9. GUARDAR REGISTRO
 # ============================================================
@@ -353,7 +450,7 @@ def ejecutar_ciclo():
                         mensaje_final = agente.construir_mensaje_claude(
                             senal, analisis, senal["riesgo"]
                         )
-                        enviar_telegram(mensaje_final)
+                        enviar_alerta_con_botones(mensaje_final, senal)
                         _ultima_alerta[simbolo] = datetime.now()
                     else:
                         log.info(f"Claude descartó la señal: {analisis['razon']}")
@@ -399,6 +496,10 @@ if __name__ == "__main__":
     log.info(f"Take-Profit:{config.TAKE_PROFIT_PORCENTAJE*100}%")
     log.info(f"Paper Mode: {config.MODO_PAPER_TRADING}")
     log.info("=" * 50)
+
+    # Iniciar polling de botones en hilo separado (no bloquea el scheduler)
+    hilo_polling = threading.Thread(target=iniciar_polling_callbacks, daemon=True)
+    hilo_polling.start()
 
     ejecutar_ciclo()
 
