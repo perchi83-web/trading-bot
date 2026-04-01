@@ -456,8 +456,23 @@ def ejecutar_ciclo():
                         log.info(f"Claude descartó la señal: {analisis['razon']}")
 
             # Verificar si hay operaciones abiertas que cerrar
-            precios = {senal["simbolo"]: senal["precio"]}
-            paper_trading.verificar_operaciones_abiertas(precios)
+            precios  = {senal["simbolo"]: senal["precio"]}
+            cerradas = paper_trading.verificar_operaciones_abiertas(precios)
+            for op in (cerradas or []):
+                if op["resultado"] == "TAKE_PROFIT":
+                    msg_cierre = (
+                        f"🟢 TAKE-PROFIT alcanzado — {op['simbolo']}\n"
+                        f"Salida a ${op['precio_salida']:,.2f}\n"
+                        f"Ganancia: +${op['ganancia']:,.2f} ({op['variacion_pct']:+.2f}%)"
+                    )
+                else:
+                    msg_cierre = (
+                        f"🔴 STOP-LOSS alcanzado — {op['simbolo']}\n"
+                        f"Salida a ${op['precio_salida']:,.2f}\n"
+                        f"Pérdida: ${op['ganancia']:,.2f} ({op['variacion_pct']:+.2f}%)"
+                    )
+                enviar_telegram(msg_cierre)
+                log.info(f"Notificación de cierre enviada: {op['resultado']} {op['simbolo']}")
             guardar_registro(senal)
         except Exception as error:
             log.error(f"Error analizando {simbolo}: {error}")
