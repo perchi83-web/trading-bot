@@ -18,7 +18,7 @@ CLAUDE_API_KEY = os.getenv("CLAUDE_API_KEY", "")
 
 # --- QUÉ MONITOREAR ---
 SIMBOLOS = ["BTC/USDT", "ETH/USDT", "SOL/USDT", "BNB/USDT"]
-STOCKS   = ["NVDA"]
+STOCKS   = ["NVDA", "AAPL", "MSFT", "TSLA", "GLD", "USO"]
 
 # --- TEMPORALIDAD ---
 INTERVALO          = "1h"
