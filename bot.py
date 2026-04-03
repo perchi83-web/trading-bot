@@ -477,13 +477,34 @@ def guardar_registro(senal):
 # 9b. RESAMPLEAR 1H → 4H (para stocks — evita segunda llamada a la API)
 # ============================================================
 def resamplear_4h(df_1h):
-    df = df_1h.copy().set_index("timestamp")
-    df_4h = df.resample("4h").agg({
-        "open": "first", "high": "max",
-        "low": "min", "close": "last", "volume": "sum"
-    }).dropna().reset_index()
-    if len(df_4h) < 50:
-        log.warning(f"resamplear_4h: solo {len(df_4h)} velas 4h — insuficiente para indicadores completos")
+    """
+    Agrupa cada 4 filas consecutivas en una vela 4h.
+    Más robusto que resample("4h") para acciones porque no depende
+    de timestamps continuos — funciona aunque el mercado esté cerrado.
+    420 velas 1h → ~105 velas 4h garantizadas.
+    """
+    df = df_1h.reset_index(drop=True)
+
+    grupos = df.groupby(df.index // 4)
+    df_4h  = grupos.agg({
+        "timestamp": "first",
+        "open":      "first",
+        "high":      "max",
+        "low":       "min",
+        "close":     "last",
+        "volume":    "sum",
+    }).reset_index(drop=True)
+
+    filas = len(df_4h)
+    if filas < 50:
+        # Usar los últimos datos disponibles y avisar
+        log.warning(
+            f"resamplear_4h: solo {filas} velas disponibles — "
+            f"usando últimas {filas} para filtro MTF"
+        )
+    else:
+        log.info(f"resamplear_4h: {filas} velas 4h generadas por agrupación de filas")
+
     return df_4h
 
 
