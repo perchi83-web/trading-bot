@@ -204,9 +204,9 @@ def calcular_riesgo(precio_entrada, atr):
 # ============================================================
 # 7. EVALUAR SEÑAL
 # ============================================================
-def evaluar_senal(df, simbolo):
-    ultima   = df.iloc[-1]
-    anterior = df.iloc[-2]
+def evaluar_senal(df_1h, df_4h, simbolo):
+    ultima   = df_1h.iloc[-1]
+    anterior = df_1h.iloc[-2]
 
     precio    = ultima["close"]
     rsi       = round(ultima["RSI"], 2)
@@ -218,7 +218,8 @@ def evaluar_senal(df, simbolo):
     obv_sube  = ultima["OBV"] > anterior["OBV"]
     hora      = datetime.now().strftime("%Y-%m-%d %H:%M")
 
-    tendencia = detectar_tendencia(df)
+    tendencia_1h = detectar_tendencia(df_1h)
+    tendencia_4h = detectar_tendencia(df_4h)
 
     macd_alcista = (ultima["MACD"] > ultima["MACD_sig"] and
                     anterior["MACD"] <= anterior["MACD_sig"])
@@ -227,61 +228,69 @@ def evaluar_senal(df, simbolo):
                     anterior["MACD"] >= anterior["MACD_sig"])
 
     # Filtros de Bollinger — el precio debe estar cerca del extremo de la banda
-    bb_cerca_inferior = precio <= bb_lower * 1.01   # hasta 1% por encima de la banda baja
-    bb_cerca_superior = precio >= bb_upper * 0.99   # hasta 1% por debajo de la banda alta
+    bb_cerca_inferior = precio <= bb_lower * 1.01
+    bb_cerca_superior = precio >= bb_upper * 0.99
 
     # -------------------------------------------------------
-    # LÓGICA PRINCIPAL — Trend Following + RSI + Bollinger
+    # LÓGICA PRINCIPAL — Trend Following + RSI + Bollinger (1h)
     # -------------------------------------------------------
-    if tendencia == "ALCISTA":
+    if tendencia_1h == "ALCISTA":
 
         if rsi < config.RSI_SOBREVENDIDO and macd_alcista and bb_cerca_inferior:
             tipo      = "COMPRA"
             confianza = "ALTA"
-            razon     = f"Tendencia ALCISTA + RSI {rsi} + cruce MACD alcista + precio en BB inferior"
+            razon     = f"1h ALCISTA + RSI {rsi} + cruce MACD alcista + precio en BB inferior"
 
         elif rsi < config.RSI_SOBREVENDIDO and bb_cerca_inferior:
             tipo      = "COMPRA"
             confianza = "MEDIA"
-            razon     = f"Tendencia ALCISTA + RSI {rsi} + precio en BB inferior"
+            razon     = f"1h ALCISTA + RSI {rsi} + precio en BB inferior"
 
         elif rsi > config.RSI_SOBRECOMPRADO and macd_bajista and bb_cerca_superior:
             tipo      = "VENTA"
             confianza = "ALTA"
-            razon     = f"Tendencia ALCISTA + RSI {rsi} + cruce MACD bajista + precio en BB superior"
+            razon     = f"1h ALCISTA + RSI {rsi} + cruce MACD bajista + precio en BB superior"
 
         else:
             tipo      = "NEUTRAL"
             confianza = "-"
-            razon     = f"Tendencia ALCISTA pero sin confluencia BB+RSI ({rsi})"
+            razon     = f"1h ALCISTA pero sin confluencia BB+RSI ({rsi})"
 
     else:
-        # Tendencia BAJISTA — proteger capital, salvo RSI extremo en banda baja
         if rsi < 20 and bb_cerca_inferior:
             tipo      = "COMPRA"
             confianza = "BAJA"
-            razon     = f"RSI extremo ({rsi}) + precio en BB inferior pese a tendencia BAJISTA"
+            razon     = f"RSI extremo ({rsi}) + precio en BB inferior pese a 1h BAJISTA"
         else:
             tipo      = "ESPERAR"
             confianza = "-"
-            razon     = f"Tendencia BAJISTA (MA50 ${ma50} < MA200 ${ma200}) — capital protegido"
+            razon     = f"1h BAJISTA (MA50 ${ma50} < MA200 ${ma200}) — capital protegido"
+
+    # -------------------------------------------------------
+    # FILTRO MAESTRO Multi-Timeframe (MTF)
+    # Si 4h es BAJISTA nunca comprar, aunque 1h parezca alcista
+    # -------------------------------------------------------
+    if tipo == "COMPRA" and tendencia_4h == "BAJISTA":
+        tipo      = "ESPERAR"
+        confianza = "-"
+        razon     = f"FILTRO MTF: 4h BAJISTA anula señal de COMPRA en 1h"
 
     # Calcular riesgo con ATR dinámico
     riesgo = calcular_riesgo(precio, atr) if tipo in ["COMPRA", "VENTA"] else None
 
     # Construir mensaje Telegram
     if tipo in ["COMPRA", "VENTA"] and riesgo:
-        estado_tendencia = "ALCISTA" if tendencia == "ALCISTA" else "BAJISTA"
-        obv_texto        = "OBV subiendo (volumen confirma)" if obv_sube else "OBV bajando"
+        obv_texto = "OBV subiendo (volumen confirma)" if obv_sube else "OBV bajando"
         mensaje = (
             f"[{tipo}] ALERTA DE TRADING\n"
             f"{'='*32}\n"
-            f"Activo:       {simbolo}\n"
-            f"Precio:       ${precio:,.2f}\n"
-            f"Tendencia:    {estado_tendencia}\n"
-            f"Señal:        {tipo}\n"
-            f"Confianza:    {confianza}\n"
-            f"Razon:        {razon}\n"
+            f"Activo:         {simbolo}\n"
+            f"Precio:         ${precio:,.2f}\n"
+            f"Tendencia 1h:   {tendencia_1h}\n"
+            f"Confirmacion 4h:{tendencia_4h}\n"
+            f"Señal:          {tipo}\n"
+            f"Confianza:      {confianza}\n"
+            f"Razon:          {razon}\n"
             f"{'='*32}\n"
             f"GESTION DE RIESGO (ATR dinamico)\n"
             f"Capital:      ${riesgo['capital_a_usar']}\n"
@@ -291,21 +300,21 @@ def evaluar_senal(df, simbolo):
             f"Ganancia esp: ${riesgo['ganancia_esperada']}\n"
             f"Ratio:        {riesgo['ratio']}\n"
             f"{'='*32}\n"
-            f"RSI:       {rsi}\n"
-            f"ATR:       {atr}\n"
+            f"RSI:         {rsi}\n"
+            f"ATR:         {atr}\n"
             f"BB inferior: ${bb_lower:,.2f}\n"
             f"BB superior: ${bb_upper:,.2f}\n"
-            f"MA50:      ${ma50:,.2f}\n"
-            f"MA200:     ${ma200:,.2f}\n"
+            f"MA50:        ${ma50:,.2f}\n"
+            f"MA200:       ${ma200:,.2f}\n"
             f"{obv_texto}\n"
-            f"Hora:      {hora}\n"
+            f"Hora:        {hora}\n"
             f"{'='*32}\n"
             f"PAPER TRADING - Solo educativo"
         )
     elif tipo == "ESPERAR":
         mensaje = (
             f"[ESPERAR] {simbolo}\n"
-            f"Tendencia BAJISTA detectada\n"
+            f"Tendencia 1h: {tendencia_1h} | 4h: {tendencia_4h}\n"
             f"MA50 ${ma50:,.2f} < MA200 ${ma200:,.2f}\n"
             f"Capital protegido. Sin operaciones.\n"
             f"Hora: {hora}"
@@ -314,14 +323,15 @@ def evaluar_senal(df, simbolo):
         mensaje = None
 
     return {
-        "tipo":      tipo,
-        "precio":    precio,
-        "rsi":       rsi,
-        "tendencia": tendencia,
-        "confianza": confianza,
-        "simbolo":   simbolo,
-        "mensaje":   mensaje,
-        "riesgo":    riesgo
+        "tipo":         tipo,
+        "precio":       precio,
+        "rsi":          rsi,
+        "tendencia":    tendencia_1h,
+        "tendencia_4h": tendencia_4h,
+        "confianza":    confianza,
+        "simbolo":      simbolo,
+        "mensaje":      mensaje,
+        "riesgo":       riesgo
     }
 
 
@@ -458,6 +468,18 @@ def guardar_registro(senal):
 
 
 # ============================================================
+# 9b. RESAMPLEAR 1H → 4H (para stocks — evita segunda llamada a la API)
+# ============================================================
+def resamplear_4h(df_1h):
+    df = df_1h.copy().set_index("timestamp")
+    df_4h = df.resample("4h").agg({
+        "open": "first", "high": "max",
+        "low": "min", "close": "last", "volume": "sum"
+    }).dropna().reset_index()
+    return df_4h
+
+
+# ============================================================
 # 10. CICLO PRINCIPAL
 # ============================================================
 def ejecutar_ciclo():
@@ -468,14 +490,17 @@ def ejecutar_ciclo():
 
     for simbolo in config.SIMBOLOS:
         try:
-            df    = obtener_velas(exchange, simbolo, config.INTERVALO)
-            df    = calcular_indicadores(df)
-            senal = evaluar_senal(df, simbolo)
+            df_1h = obtener_velas(exchange, simbolo, config.INTERVALO)
+            df_4h = obtener_velas(exchange, simbolo, "4h")
+            df_1h = calcular_indicadores(df_1h)
+            df_4h = calcular_indicadores(df_4h)
+            senal = evaluar_senal(df_1h, df_4h, simbolo)
             log.info(
                 f"{simbolo} | {senal['tipo']} | "
                 f"${senal['precio']:,.2f} | "
                 f"RSI: {senal['rsi']} | "
-                f"Tendencia: {senal['tendencia']}"
+                f"Tendencia 1h: {senal['tendencia']} | "
+                f"Tendencia 4h: {senal['tendencia_4h']}"
             )
             if senal["tipo"] in ["COMPRA", "VENTA"]:
                 # Verificar cooldown de 4 horas por activo
@@ -486,7 +511,7 @@ def ejecutar_ciclo():
                     log.info(f"{simbolo} en cooldown — alerta omitida (última hace {int((datetime.now()-ultima).seconds/60)} min)")
                 else:
                     # Claude razona la señal antes de alertar
-                    analisis = agente.obtener_analisis(senal, df)
+                    analisis = agente.obtener_analisis(senal, df_1h)
 
                     if analisis["decision"] in ["COMPRA", "VENTA"]:
                         paper_trading.abrir_operacion(
@@ -527,14 +552,17 @@ def ejecutar_ciclo():
 
     for simbolo in config.STOCKS:
         try:
-            df    = obtener_velas_stock(simbolo, config.INTERVALO)
-            df    = calcular_indicadores(df)
-            senal = evaluar_senal(df, simbolo)
+            df_1h = obtener_velas_stock(simbolo, config.INTERVALO)
+            df_4h = resamplear_4h(df_1h)          # resampleo local, sin llamada extra a la API
+            df_1h = calcular_indicadores(df_1h)
+            df_4h = calcular_indicadores(df_4h)
+            senal = evaluar_senal(df_1h, df_4h, simbolo)
             log.info(
                 f"{simbolo} | {senal['tipo']} | "
                 f"${senal['precio']:,.2f} | "
                 f"RSI: {senal['rsi']} | "
-                f"Tendencia: {senal['tendencia']}"
+                f"Tendencia 1h: {senal['tendencia']} | "
+                f"Tendencia 4h: {senal['tendencia_4h']}"
             )
             if senal["tipo"] in ["COMPRA", "VENTA"] and senal["mensaje"]:
                 enviar_telegram(senal["mensaje"])
