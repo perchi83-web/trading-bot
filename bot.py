@@ -180,11 +180,11 @@ def detectar_tendencia(df):
 def calcular_riesgo(precio_entrada, atr):
     """
     Gestión de riesgo dinámica basada en ATR — Ratio 1:3
-    Stop-Loss:   Precio - (ATR * 1.5) → se adapta a la volatilidad actual
+    Stop-Loss:   Precio - (ATR * 1.8) → se adapta a la volatilidad actual
     Take-Profit: Precio + (distancia_stop * 3) → ratio 1:3 garantizado
     """
     capital_op     = config.CAPITAL_TOTAL * config.RIESGO_POR_OPERACION
-    distancia_stop = atr * 1.5
+    distancia_stop = atr * 1.8
     stop_loss      = precio_entrada - distancia_stop
     take_profit    = precio_entrada + (distancia_stop * 3)
     pct_stop       = distancia_stop / precio_entrada
@@ -301,7 +301,7 @@ def evaluar_senal(df_1h, df_4h, simbolo):
             f"Ratio:        {riesgo['ratio']}\n"
             f"{'='*32}\n"
             f"RSI:         {rsi}\n"
-            f"ATR:         {atr}\n"
+            f"Volatilidad ATR: ${atr}\n"
             f"BB inferior: ${bb_lower:,.2f}\n"
             f"BB superior: ${bb_upper:,.2f}\n"
             f"MA50:        ${ma50:,.2f}\n"
