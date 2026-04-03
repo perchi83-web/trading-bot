@@ -105,7 +105,7 @@ def obtener_velas(exchange, simbolo, intervalo, limite=250, reintentos=3, espera
 # ============================================================
 def obtener_velas_stock(simbolo, intervalo="1h"):
     ticker = yf.Ticker(simbolo)
-    df = ticker.history(period="60d", interval=intervalo).reset_index()
+    df = ticker.history(period="730d", interval=intervalo).reset_index()
     col_time = "Datetime" if "Datetime" in df.columns else "Date"
     df = df.rename(columns={
         col_time: "timestamp",
