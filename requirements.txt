@@ -1,6 +1,7 @@
 ﻿ccxt
 yfinance
 pandas
+pandas_ta
 requests
 apscheduler
 anthropic

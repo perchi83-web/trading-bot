@@ -24,10 +24,12 @@ sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8", errors="repla
 
 import ccxt
 import pandas as pd
+import pandas_ta as ta
 import yfinance as yf
 import requests
 import logging
 import threading
+import time
 from datetime import datetime, timedelta
 from apscheduler.schedulers.blocking import BlockingScheduler
 
@@ -59,28 +61,43 @@ log = logging.getLogger(__name__)
 # ============================================================
 # 2. CONECTAR CON EXCHANGE
 # ============================================================
-def conectar_exchange():
-    exchange = ccxt.binance({
-        "apiKey": config.BINANCE_API_KEY,
-        "secret": config.BINANCE_SECRET,
-    })
-    log.info("Conectado al exchange correctamente")
-    return exchange
+def conectar_exchange(reintentos=3, espera=5):
+    for intento in range(1, reintentos + 1):
+        try:
+            exchange = ccxt.binance({
+                "apiKey": config.BINANCE_API_KEY,
+                "secret": config.BINANCE_SECRET,
+            })
+            log.info("Conectado al exchange correctamente")
+            return exchange
+        except Exception as e:
+            log.warning(f"Intento {intento}/{reintentos} fallido al conectar exchange: {e}")
+            if intento < reintentos:
+                time.sleep(espera)
+    raise ConnectionError("No se pudo conectar al exchange tras 3 intentos")
 
 
 # ============================================================
 # 3. OBTENER DATOS — CRIPTOS
 # ============================================================
-def obtener_velas(exchange, simbolo, intervalo, limite=250):
+def obtener_velas(exchange, simbolo, intervalo, limite=250, reintentos=3, espera=5):
     """
     Descargamos 250 velas para tener suficientes datos
     para calcular MA200 correctamente.
+    Incluye reintentos ante micro-cortes de conexión.
     """
-    datos_crudos = exchange.fetch_ohlcv(simbolo, intervalo, limit=limite)
-    df = pd.DataFrame(datos_crudos, columns=["timestamp", "open", "high", "low", "close", "volume"])
-    df["timestamp"] = pd.to_datetime(df["timestamp"], unit="ms")
-    log.info(f"{limite} velas obtenidas para {simbolo} ({intervalo})")
-    return df
+    for intento in range(1, reintentos + 1):
+        try:
+            datos_crudos = exchange.fetch_ohlcv(simbolo, intervalo, limit=limite)
+            df = pd.DataFrame(datos_crudos, columns=["timestamp", "open", "high", "low", "close", "volume"])
+            df["timestamp"] = pd.to_datetime(df["timestamp"], unit="ms")
+            log.info(f"{limite} velas obtenidas para {simbolo} ({intervalo})")
+            return df
+        except Exception as e:
+            log.warning(f"Intento {intento}/{reintentos} fallido al obtener velas de {simbolo}: {e}")
+            if intento < reintentos:
+                time.sleep(espera)
+    raise ConnectionError(f"No se pudieron obtener velas de {simbolo} tras {reintentos} intentos")
 
 
 # ============================================================
@@ -122,7 +139,19 @@ def calcular_indicadores(df):
     df["MA50"]  = df["close"].rolling(50).mean()
     df["MA200"] = df["close"].rolling(200).mean()
 
-    log.info("Indicadores calculados: RSI + MACD + MA20 + MA50 + MA200")
+    # Bandas de Bollinger (20 periodos, 2 desviaciones)
+    bbands         = ta.bbands(df["close"], length=20, std=2)
+    df["BB_lower"] = bbands.iloc[:, 0]   # BBL
+    df["BB_mid"]   = bbands.iloc[:, 1]   # BBM
+    df["BB_upper"] = bbands.iloc[:, 2]   # BBU
+
+    # OBV — On-Balance Volume (valida si el volumen respalda el precio)
+    df["OBV"] = ta.obv(df["close"], df["volume"])
+
+    # ATR — Average True Range 14 periodos (mide volatilidad)
+    df["ATR"] = ta.atr(df["high"], df["low"], df["close"], length=14)
+
+    log.info("Indicadores calculados: RSI + MACD + MA20/50/200 + BB + OBV + ATR")
     return df.dropna().reset_index(drop=True)
 
 
@@ -144,25 +173,27 @@ def detectar_tendencia(df):
 # ============================================================
 # 6. CALCULAR GESTIÓN DE RIESGO
 # ============================================================
-def calcular_riesgo(precio_entrada):
+def calcular_riesgo(precio_entrada, atr):
     """
-    Ratio 1:3 — por cada $1 arriesgado, buscamos ganar $3
-    Stop-Loss:   2% → pérdida máxima controlada
-    Take-Profit: 6% → ganancia objetivo
+    Gestión de riesgo dinámica basada en ATR — Ratio 1:3
+    Stop-Loss:   Precio - (ATR * 1.5) → se adapta a la volatilidad actual
+    Take-Profit: Precio + (distancia_stop * 3) → ratio 1:3 garantizado
     """
-    capital_op      = config.CAPITAL_TOTAL * config.RIESGO_POR_OPERACION
-    stop_loss       = precio_entrada * (1 - config.STOP_LOSS_PORCENTAJE)
-    take_profit     = precio_entrada * (1 + config.TAKE_PROFIT_PORCENTAJE)
-    perdida_max     = capital_op * config.STOP_LOSS_PORCENTAJE
-    ganancia_esp    = capital_op * config.TAKE_PROFIT_PORCENTAJE
+    capital_op     = config.CAPITAL_TOTAL * config.RIESGO_POR_OPERACION
+    distancia_stop = atr * 1.5
+    stop_loss      = precio_entrada - distancia_stop
+    take_profit    = precio_entrada + (distancia_stop * 3)
+    pct_stop       = distancia_stop / precio_entrada
+    perdida_max    = round(capital_op * pct_stop, 2)
+    ganancia_esp   = round(capital_op * pct_stop * 3, 2)
 
     return {
         "capital_a_usar":    round(capital_op, 2),
         "stop_loss":         round(stop_loss, 2),
         "take_profit":       round(take_profit, 2),
-        "perdida_maxima":    round(perdida_max, 2),
-        "ganancia_esperada": round(ganancia_esp, 2),
-        "ratio":             f"1:{int(config.TAKE_PROFIT_PORCENTAJE / config.STOP_LOSS_PORCENTAJE)}"
+        "perdida_maxima":    perdida_max,
+        "ganancia_esperada": ganancia_esp,
+        "ratio":             "1:3"
     }
 
 
@@ -177,6 +208,10 @@ def evaluar_senal(df, simbolo):
     rsi       = round(ultima["RSI"], 2)
     ma50      = round(ultima["MA50"], 2)
     ma200     = round(ultima["MA200"], 2)
+    atr       = round(ultima["ATR"], 4)
+    bb_lower  = round(ultima["BB_lower"], 2)
+    bb_upper  = round(ultima["BB_upper"], 2)
+    obv_sube  = ultima["OBV"] > anterior["OBV"]
     hora      = datetime.now().strftime("%Y-%m-%d %H:%M")
 
     tendencia = detectar_tendencia(df)
@@ -187,48 +222,53 @@ def evaluar_senal(df, simbolo):
     macd_bajista = (ultima["MACD"] < ultima["MACD_sig"] and
                     anterior["MACD"] >= anterior["MACD_sig"])
 
+    # Filtros de Bollinger — el precio debe estar cerca del extremo de la banda
+    bb_cerca_inferior = precio <= bb_lower * 1.01   # hasta 1% por encima de la banda baja
+    bb_cerca_superior = precio >= bb_upper * 0.99   # hasta 1% por debajo de la banda alta
+
     # -------------------------------------------------------
-    # LÓGICA PRINCIPAL — Trend Following + RSI
+    # LÓGICA PRINCIPAL — Trend Following + RSI + Bollinger
     # -------------------------------------------------------
     if tendencia == "ALCISTA":
 
-        if rsi < config.RSI_SOBREVENDIDO and macd_alcista:
+        if rsi < config.RSI_SOBREVENDIDO and macd_alcista and bb_cerca_inferior:
             tipo      = "COMPRA"
             confianza = "ALTA"
-            razon     = f"Tendencia ALCISTA + RSI sobrevendido ({rsi}) + cruce MACD alcista"
+            razon     = f"Tendencia ALCISTA + RSI {rsi} + cruce MACD alcista + precio en BB inferior"
 
-        elif rsi < config.RSI_SOBREVENDIDO:
+        elif rsi < config.RSI_SOBREVENDIDO and bb_cerca_inferior:
             tipo      = "COMPRA"
             confianza = "MEDIA"
-            razon     = f"Tendencia ALCISTA + RSI sobrevendido ({rsi})"
+            razon     = f"Tendencia ALCISTA + RSI {rsi} + precio en BB inferior"
 
-        elif rsi > config.RSI_SOBRECOMPRADO and macd_bajista:
+        elif rsi > config.RSI_SOBRECOMPRADO and macd_bajista and bb_cerca_superior:
             tipo      = "VENTA"
             confianza = "ALTA"
-            razon     = f"Tendencia ALCISTA + RSI sobrecomprado ({rsi}) + cruce MACD bajista"
+            razon     = f"Tendencia ALCISTA + RSI {rsi} + cruce MACD bajista + precio en BB superior"
 
         else:
             tipo      = "NEUTRAL"
             confianza = "-"
-            razon     = f"Tendencia ALCISTA pero RSI neutral ({rsi})"
+            razon     = f"Tendencia ALCISTA pero sin confluencia BB+RSI ({rsi})"
 
     else:
-        # Tendencia BAJISTA — proteger capital, salvo RSI extremo
-        if rsi < 20:
+        # Tendencia BAJISTA — proteger capital, salvo RSI extremo en banda baja
+        if rsi < 20 and bb_cerca_inferior:
             tipo      = "COMPRA"
             confianza = "BAJA"
-            razon     = f"RSI extremadamente sobrevendido ({rsi}) pese a tendencia BAJISTA"
+            razon     = f"RSI extremo ({rsi}) + precio en BB inferior pese a tendencia BAJISTA"
         else:
             tipo      = "ESPERAR"
             confianza = "-"
             razon     = f"Tendencia BAJISTA (MA50 ${ma50} < MA200 ${ma200}) — capital protegido"
 
-    # Calcular riesgo solo si hay señal accionable
-    riesgo = calcular_riesgo(precio) if tipo in ["COMPRA", "VENTA"] else None
+    # Calcular riesgo con ATR dinámico
+    riesgo = calcular_riesgo(precio, atr) if tipo in ["COMPRA", "VENTA"] else None
 
     # Construir mensaje Telegram
     if tipo in ["COMPRA", "VENTA"] and riesgo:
         estado_tendencia = "ALCISTA" if tendencia == "ALCISTA" else "BAJISTA"
+        obv_texto        = "OBV subiendo (volumen confirma)" if obv_sube else "OBV bajando"
         mensaje = (
             f"[{tipo}] ALERTA DE TRADING\n"
             f"{'='*32}\n"
@@ -239,7 +279,7 @@ def evaluar_senal(df, simbolo):
             f"Confianza:    {confianza}\n"
             f"Razon:        {razon}\n"
             f"{'='*32}\n"
-            f"GESTION DE RIESGO\n"
+            f"GESTION DE RIESGO (ATR dinamico)\n"
             f"Capital:      ${riesgo['capital_a_usar']}\n"
             f"Stop-Loss:    ${riesgo['stop_loss']:,.2f}\n"
             f"Take-Profit:  ${riesgo['take_profit']:,.2f}\n"
@@ -247,10 +287,14 @@ def evaluar_senal(df, simbolo):
             f"Ganancia esp: ${riesgo['ganancia_esperada']}\n"
             f"Ratio:        {riesgo['ratio']}\n"
             f"{'='*32}\n"
-            f"RSI:   {rsi}\n"
-            f"MA50:  ${ma50:,.2f}\n"
-            f"MA200: ${ma200:,.2f}\n"
-            f"Hora:  {hora}\n"
+            f"RSI:       {rsi}\n"
+            f"ATR:       {atr}\n"
+            f"BB inferior: ${bb_lower:,.2f}\n"
+            f"BB superior: ${bb_upper:,.2f}\n"
+            f"MA50:      ${ma50:,.2f}\n"
+            f"MA200:     ${ma200:,.2f}\n"
+            f"{obv_texto}\n"
+            f"Hora:      {hora}\n"
             f"{'='*32}\n"
             f"PAPER TRADING - Solo educativo"
         )
