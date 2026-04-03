@@ -24,7 +24,7 @@ sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8", errors="repla
 
 import ccxt
 import pandas as pd
-import pandas_ta as ta
+import ta
 import yfinance as yf
 import requests
 import logging
@@ -140,16 +140,20 @@ def calcular_indicadores(df):
     df["MA200"] = df["close"].rolling(200).mean()
 
     # Bandas de Bollinger (20 periodos, 2 desviaciones)
-    bbands         = ta.bbands(df["close"], length=20, std=2)
-    df["BB_lower"] = bbands.iloc[:, 0]   # BBL
-    df["BB_mid"]   = bbands.iloc[:, 1]   # BBM
-    df["BB_upper"] = bbands.iloc[:, 2]   # BBU
+    bb             = ta.volatility.BollingerBands(close=df["close"], window=20, window_dev=2)
+    df["BB_lower"] = bb.bollinger_lband()
+    df["BB_mid"]   = bb.bollinger_mavg()
+    df["BB_upper"] = bb.bollinger_hband()
 
     # OBV — On-Balance Volume (valida si el volumen respalda el precio)
-    df["OBV"] = ta.obv(df["close"], df["volume"])
+    df["OBV"] = ta.volume.OnBalanceVolumeIndicator(
+        close=df["close"], volume=df["volume"]
+    ).on_balance_volume()
 
     # ATR — Average True Range 14 periodos (mide volatilidad)
-    df["ATR"] = ta.atr(df["high"], df["low"], df["close"], length=14)
+    df["ATR"] = ta.volatility.AverageTrueRange(
+        high=df["high"], low=df["low"], close=df["close"], window=14
+    ).average_true_range()
 
     log.info("Indicadores calculados: RSI + MACD + MA20/50/200 + BB + OBV + ATR")
     return df.dropna().reset_index(drop=True)
