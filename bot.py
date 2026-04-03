@@ -219,7 +219,13 @@ def evaluar_senal(df_1h, df_4h, simbolo):
     hora      = datetime.now().strftime("%Y-%m-%d %H:%M")
 
     tendencia_1h = detectar_tendencia(df_1h)
-    tendencia_4h = detectar_tendencia(df_4h)
+
+    # Filtro MTF: solo aplicar si df_4h tiene datos suficientes
+    if len(df_4h) >= 50:
+        tendencia_4h = detectar_tendencia(df_4h)
+    else:
+        tendencia_4h = tendencia_1h   # fallback: asumir igual que 1h → filtro MTF inactivo
+        log.warning(f"{simbolo}: df_4h con {len(df_4h)} filas — filtro MTF ignorado, usando solo tendencia 1h")
 
     macd_alcista = (ultima["MACD"] > ultima["MACD_sig"] and
                     anterior["MACD"] <= anterior["MACD_sig"])
@@ -476,6 +482,8 @@ def resamplear_4h(df_1h):
         "open": "first", "high": "max",
         "low": "min", "close": "last", "volume": "sum"
     }).dropna().reset_index()
+    if len(df_4h) < 50:
+        log.warning(f"resamplear_4h: solo {len(df_4h)} velas 4h — insuficiente para indicadores completos")
     return df_4h
 
 
