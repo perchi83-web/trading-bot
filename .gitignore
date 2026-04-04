@@ -1,0 +1,5 @@
+*.log
+historial_senales.csv
+__pycache__/
+.env
+paper_estado.json

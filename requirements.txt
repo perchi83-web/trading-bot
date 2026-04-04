@@ -1,0 +1,9 @@
+﻿ccxt
+yfinance
+pandas
+ta
+requests
+apscheduler
+anthropic
+python-dotenv
+google-genai
